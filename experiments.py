@@ -11,6 +11,8 @@ import csv
 import math
 import statistics as stats
 import random
+from itertools import product
+import tqdm
 
 from model import simulate, AirplaneConfig, TimeConfig, PassengerTrace
 from policies import get_policy, PolicyName
@@ -25,7 +27,9 @@ def mean_ci95(xs: Sequence[float]) -> Tuple[float, float, float]:
     return m, sd, hw
 
 
-def write_csv(path: str, rows: List[Dict[str, Any]], fieldnames: Optional[List[str]] = None) -> None:
+def write_csv(
+    path: str, rows: List[Dict[str, Any]], fieldnames: Optional[List[str]] = None
+) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if not rows:
         return
@@ -60,13 +64,18 @@ def run_replications(
     for r in range(reps):
         rng = random.Random(seed0 + r)
         manifest = policy_fn(
-            airplane.rows, rng=rng, p_luggage=p_luggage,
-            seat_ids=airplane.seat_ids, **policy_kwargs
+            airplane.rows,
+            rng=rng,
+            p_luggage=p_luggage,
+            seat_ids=airplane.seat_ids,
+            **policy_kwargs,
         )
         t, tr = simulate(
-            manifest, seed=seed0 + r,
-            airplane=airplane, times=times,
-            trace_first_n=trace_first_n
+            manifest,
+            seed=seed0 + r,
+            airplane=airplane,
+            times=times,
+            trace_first_n=trace_first_n,
         )
         finish_times.append(t)
         if r == 0:
@@ -96,14 +105,36 @@ def task2_face_validation(out_dir: str = "results") -> Dict[str, Any]:
         base_seat_time=8.0,
         interference_penalty=6.0,
         luggage_add_time=8.0,
-        seat_time_dist="deterministic"
+        seat_time_dist="deterministic",
     )
 
     scenarios = [
-        ("all_zero_seating", dict(times=TimeConfig(walk_time_per_row=1.5, base_seat_time=0.0, interference_penalty=0.0, luggage_add_time=0.0), p_luggage=0.0)),
+        (
+            "all_zero_seating",
+            dict(
+                times=TimeConfig(
+                    walk_time_per_row=1.5,
+                    base_seat_time=0.0,
+                    interference_penalty=0.0,
+                    luggage_add_time=0.0,
+                ),
+                p_luggage=0.0,
+            ),
+        ),
         ("no_luggage", dict(times=base, p_luggage=0.0)),
         ("all_luggage", dict(times=base, p_luggage=1.0)),
-        ("high_interference", dict(times=TimeConfig(walk_time_per_row=1.5, base_seat_time=8.0, interference_penalty=12.0, luggage_add_time=8.0), p_luggage=0.5)),
+        (
+            "high_interference",
+            dict(
+                times=TimeConfig(
+                    walk_time_per_row=1.5,
+                    base_seat_time=8.0,
+                    interference_penalty=12.0,
+                    luggage_add_time=8.0,
+                ),
+                p_luggage=0.5,
+            ),
+        ),
     ]
 
     rows = []
@@ -119,18 +150,20 @@ def task2_face_validation(out_dir: str = "results") -> Dict[str, Any]:
             p_luggage=cfg["p_luggage"],
             trace_first_n=5,
         )
-        rows.append({
-            "scenario": name,
-            "mean_time_s": res["mean_time_s"],
-            "sd_s": res["sd_s"],
-            "ci95_halfwidth_s": res["ci95_halfwidth_s"],
-            "min_s": res["min_s"],
-            "max_s": res["max_s"],
-            "p_luggage": cfg["p_luggage"],
-            "base_seat_time": cfg["times"].base_seat_time,
-            "interference_penalty": cfg["times"].interference_penalty,
-            "luggage_add_time": cfg["times"].luggage_add_time,
-        })
+        rows.append(
+            {
+                "scenario": name,
+                "mean_time_s": res["mean_time_s"],
+                "sd_s": res["sd_s"],
+                "ci95_halfwidth_s": res["ci95_halfwidth_s"],
+                "min_s": res["min_s"],
+                "max_s": res["max_s"],
+                "p_luggage": cfg["p_luggage"],
+                "base_seat_time": cfg["times"].base_seat_time,
+                "interference_penalty": cfg["times"].interference_penalty,
+                "luggage_add_time": cfg["times"].luggage_add_time,
+            }
+        )
         for tr in res["sample_trace"]:
             tr2 = dict(tr)
             tr2["scenario"] = name
@@ -146,41 +179,53 @@ def task2_face_validation(out_dir: str = "results") -> Dict[str, Any]:
 def task2_sweep_seat_times(out_dir: str = "results") -> Dict[str, Any]:
     airplane = AirplaneConfig(rows=30)
     reps = 50
-    p_luggage = 0.5
 
-    base_seat_values = [6.0, 8.0, 10.0, 12.0]
-    interference_values = [0.0, 4.0, 8.0, 12.0]
-    luggage_add_values = [0.0, 8.0, 16.0]
+    base_seat_values = [4, 6, 8, 10, 12]
+    interference_values = [1, 3, 8, 12]
+    luggage_add_values = [1, 8, 16]
+    p_luggage_values = [0, 0.5, 0.7, 1]
+    strategy_values = ["random", "back_to_front", "wilma"]
 
+    param_grid = list(
+        product(
+            base_seat_values,
+            interference_values,
+            luggage_add_values,
+            p_luggage_values,
+            strategy_values,
+        )
+    )
     rows = []
-    for base_seat in base_seat_values:
-        for interference in interference_values:
-            for luggage_add in luggage_add_values:
-                times = TimeConfig(
-                    walk_time_per_row=1.5,
-                    base_seat_time=base_seat,
-                    interference_penalty=interference,
-                    luggage_add_time=luggage_add,
-                    seat_time_dist="deterministic",
-                )
-                res = run_replications(
-                    policy="random",
-                    airplane=airplane,
-                    times=times,
-                    reps=reps,
-                    seed0=2000,
-                    p_luggage=p_luggage,
-                )
-                rows.append({
-                    "base_seat_time": base_seat,
-                    "interference_penalty": interference,
-                    "luggage_add_time": luggage_add,
-                    "p_luggage": p_luggage,
-                    "reps": reps,
-                    "mean_time_s": res["mean_time_s"],
-                    "sd_s": res["sd_s"],
-                    "ci95_halfwidth_s": res["ci95_halfwidth_s"],
-                })
+    for base_seat, interference, luggage_add, p_luggage, strategy in tqdm.tqdm(
+        param_grid
+    ):
+        times = TimeConfig(
+            walk_time_per_row=1.5,
+            base_seat_time=base_seat,
+            interference_penalty=interference,
+            luggage_add_time=luggage_add,
+            seat_time_dist="deterministic",
+        )
+        res = run_replications(
+            policy=strategy,
+            airplane=airplane,
+            times=times,
+            reps=reps,
+            seed0=2000,
+            p_luggage=p_luggage,
+        )
+        rows.append(
+            {
+                "base_seat_time": base_seat,
+                "interference_penalty": interference,
+                "luggage_add_time": luggage_add,
+                "p_luggage": p_luggage,
+                "reps": reps,
+                "mean_time_s": res["mean_time_s"],
+                "sd_s": res["sd_s"],
+                "ci95_halfwidth_s": res["ci95_halfwidth_s"],
+            }
+        )
 
     path = os.path.join(out_dir, "task2_sweep_seat_times.csv")
     write_csv(path, rows)

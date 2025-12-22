@@ -17,7 +17,7 @@ import random
 import simpy
 
 SeatId = Literal["A","B","C","D","E","F"]
-SeatDist = Literal["deterministic","lognormal","triangular"]
+SeatDist = Literal["deterministic","lognormal","triangular","exponential"]
 
 SEATS_3X3: List[SeatId] = ["A","B","C","D","E","F"]
 
@@ -39,12 +39,16 @@ def blockers_for(seat: SeatId) -> List[SeatId]:
 
 def seat_group(seat: SeatId) -> str:
     if seat in ("A","F"):
-        return "window"
+        # return "window"
+        return 1
     if seat in ("B","E"):
-        return "middle"
+        # return "middle"
+        return 2
     if seat in ("C","D"):
-        return "aisle"
-    return "other"
+        # return "aisle"
+        return 3
+    # return "other"
+    return 4
 
 
 def draw_service_time(mean: float, rng: random.Random, dist: SeatDist) -> float:
@@ -61,6 +65,8 @@ def draw_service_time(mean: float, rng: random.Random, dist: SeatDist) -> float:
         low = 0.7 * mean
         high = 1.3 * mean
         return float(rng.triangular(low, high, mean))
+    if dist == "exponential":
+        return float(rng.expovariate(1.0 / mean))
     raise ValueError(f"Unknown dist: {dist}")
 
 
@@ -82,9 +88,9 @@ class AirplaneConfig:
 @dataclass(frozen=True)
 class TimeConfig:
     walk_time_per_row: float = 1.5
-    base_seat_time: float = 8.0
-    interference_penalty: float = 6.0
-    luggage_add_time: float = 8.0
+    base_seat_time: float = 8.0 # Time it takes to seat with no blockers and no luggage
+    interference_penalty: float = 6.0 # Additional time per added blocker
+    luggage_add_time: float = 8.0 # Additional time if the passenger has luggage
     seat_time_dist: SeatDist = "deterministic"
 
 
