@@ -9,7 +9,7 @@ import random
 
 from model import Passenger, SeatId, SEATS_3X3, seat_group
 
-PolicyName = Literal["random", "back_to_front", "wilma"]
+PolicyName = Literal["random", "back_to_front", "wilma", "steffen_boarding"]
 
 
 def all_seats(rows: int, seat_ids: Tuple[SeatId, ...] = tuple(SEATS_3X3)) -> List[Tuple[int, SeatId]]:
@@ -48,6 +48,23 @@ def policy_random(rows: int, rng: random.Random, p_luggage: float = 0.5,
     rng.shuffle(seats)
     return make_manifest_from_ordered_seats(seats, rng, p_luggage)
 
+
+def steffen_boarding(rows: int, rng: random.Random, p_luggage: float = 0.5,
+                     seat_ids: Tuple[SeatId, ...] = tuple(SEATS_3X3)) -> List[Passenger]:
+
+    seats = all_seats(rows, seat_ids)
+
+    def sorting_steffen_method(seat):
+        row, seat_id = seat
+
+        #to return for sorting sequence: seat_id e.g A,B,.., even rows and then odd, back to front 
+        return (seat_group(seat_id), row % 2, -row)  
+
+    seats.sort(key=sorting_steffen_method)
+    return make_manifest_from_ordered_seats(seats, rng, p_luggage)
+
+
+
 def with_business_class(manifest: List[Passenger],
                         business_rows: int,
                         ) -> List[Passenger]:
@@ -62,4 +79,6 @@ def get_policy(name: PolicyName) -> Callable[..., List[Passenger]]:
         return back_to_front
     elif name == "wilma":
         return wilma
+    elif name == "steffen_boarding":
+        return steffen_boarding
     raise ValueError(f"Unknown policy: {name}")
