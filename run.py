@@ -10,6 +10,7 @@ import argparse
 from experiments import (
     task2_face_validation,
     task2_sweep_seat_times,
+    task3_many_boarding_strategies,
 )
 
 
@@ -18,6 +19,7 @@ def main():
     parser.add_argument("task", choices=[
         "task2_face_validation",
         "task2_sweep",
+        "task3_seat_time_dist",
     ])
     parser.add_argument("--out", default="results", help="Output directory for CSV results (default: results)")
     args = parser.parse_args()
@@ -26,6 +28,8 @@ def main():
         out = task2_face_validation(out_dir=args.out)
     elif args.task == "task2_sweep":
         out = task2_sweep_seat_times(out_dir=args.out)
+    elif args.task == "task3_seat_time_dist":
+        out = task3_many_boarding_strategies()
     else:
         raise ValueError(args.task)
 
