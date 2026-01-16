@@ -47,22 +47,15 @@ def plot_seat_time_histogram(
 
 
 def plot_avg_seat_time_histogram(
-    df: pd.DataFrame, strategy: str, seat_time_dist: str, ax=None
+    df: pd.DataFrame, strategy: str, seat_time_dist: str, bins, ax=None
 ):
     """
     Plots a histogram where each bin's height is the average count across all replications for that bin (i.e., average histogram over replications).
     If ax is provided, plot on that axis; otherwise, create a new figure.
+    Uses provided bins for consistency across subplots.
     """
     df["seat_time"] = df["seat_end_t"] - df["enter_t"]
-    # Get all seat times and replications
     replications = df["replication"].unique()
-    seat_times = df["seat_time"]
-    # Compute global bin edges
-    bin_count = 20
-    min_time = seat_times.min()
-    max_time = seat_times.max()
-    bins = np.linspace(min_time, max_time, bin_count + 1)
-    # For each replication, compute histogram
     histograms = []
     for rep in replications:
         rep_seat_times = df[df["replication"] == rep]["seat_time"]
@@ -81,10 +74,68 @@ def plot_avg_seat_time_histogram(
         edgecolor="black",
         label="Mean",
     )
+    # Compute and annotate average boarding time
+    avg_boarding_time = df.groupby("replication")["seat_end_t"].max().mean()# - df.groupby("replication")["enter_t"].min().mean()
+    # Place text in top right corner above bars
+    ylim = ax.get_ylim()
+    xlim = ax.get_xlim()
+    xpos = xlim[1] - 0.1 * (xlim[1] - xlim[0])
+    ypos = ylim[1] - 0.05 * (ylim[1] - ylim[0])
+    ax.text(
+        xpos,
+        ypos,
+        f"{avg_boarding_time:.2f}s",
+        ha="right",
+        va="top",
+        fontsize=20,
+        color="black",
+        bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
+    )
     ax.set_title(f"{strategy}, {seat_time_dist}")
     ax.set_xlabel("Time to Take Seat (s)")
     ax.set_ylabel("Avg Passenger Count per Bin")
+    ax.set_xlim(bins[0], bins[-1])
     ax.legend()
+
+
+def plot_avg_seat_time_grid(
+    strategies,
+    seat_time_dists,
+    results_dir="results/json",
+    out_path="plots/avg_hist_seat_time_grid.png",
+    bin_count=30,
+):
+    # Load all dataframes and compute global min/max
+    dfs = {}
+    min_time = float("inf")
+    max_time = float("-inf")
+    for strategy in strategies:
+        for seat_time_dist in seat_time_dists:
+            df = load_experiment_json(strategy, seat_time_dist, results_dir=results_dir)
+            df["seat_time"] = df["seat_end_t"] - df["enter_t"]
+            dfs[(strategy, seat_time_dist)] = df
+            min_time = min(min_time, df["seat_time"].min())
+            max_time = max(max_time, df["seat_time"].max())
+    bins = np.linspace(min_time, max_time, bin_count + 1)
+    n_rows = len(strategies)
+    n_cols = len(seat_time_dists)
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharex=True, sharey=True
+    )
+    for i, strategy in enumerate(strategies):
+        for j, seat_time_dist in enumerate(seat_time_dists):
+            ax = axes[i, j] if n_rows > 1 and n_cols > 1 else axes[max(i, j)]
+            df = dfs[(strategy, seat_time_dist)]
+            plot_avg_seat_time_histogram(
+                df,
+                strategy=strategy,
+                seat_time_dist=seat_time_dist,
+                bins=bins,
+                ax=ax,
+            )
+    plt.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
 
 
 # Columns [base_seat_time,interference_penalty,luggage_add_time,p_luggage,strategy,reps,mean_time_s,sd_s,ci95_halfwidth_s]
@@ -153,24 +204,6 @@ if __name__ == "__main__":
     #     output_file="ci95_halfwidth_heatmap.png",
     # )
 
-    # Load experiment JSON data
-    
-    
-    strategies = ["random", "wilma", "back_to_front", "steffen_boarding"]
+    strategies = ["random", "wilma", "back_to_front"]
     seat_time_dists = ["exponential", "lognormal", "triangular"]
-    n_rows = len(strategies)
-    n_cols = len(seat_time_dists)
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharex=True, sharey=True)
-    for i, strategy in enumerate(strategies):
-        for j, seat_time_dist in enumerate(seat_time_dists):
-            df = load_experiment_json(strategy, seat_time_dist)
-            ax = axes[i, j] if n_rows > 1 and n_cols > 1 else axes[max(i, j)]
-            plot_avg_seat_time_histogram(
-                df,
-                strategy=strategy,
-                seat_time_dist=seat_time_dist,
-                ax=ax,
-            )
-    plt.tight_layout()
-    fig.savefig(os.path.join("plots", "avg_hist_seat_time_grid.png"))
-    plt.close(fig)
+    plot_avg_seat_time_grid(strategies, seat_time_dists)
