@@ -37,7 +37,7 @@ def blockers_for(seat: SeatId) -> List[SeatId]:
     raise ValueError(f"Unknown seat {seat}")
 
 
-def seat_group(seat: SeatId) -> str:
+def seat_group(seat: SeatId) -> int:
     if seat in ("A","F"):
         # return "window"
         return 1
@@ -76,6 +76,7 @@ class Passenger:
     row: int
     seat: SeatId
     has_luggage: bool
+    door: str = "front"
 
 
 @dataclass(frozen=True)
@@ -136,8 +137,14 @@ class BoardingModel:
         self.finish_time: Optional[float] = None
         self.trace: List[PassengerTrace] = []
 
-    def can_enter(self) -> bool:
-        return self.aisle_occ[1] < self.airplane.aisle_capacity_per_row
+    def can_enter(self, door: str) -> bool:
+        if door == "front":
+            entry_row = 1
+        elif door == "back":
+            entry_row = self.airplane.rows
+        else:
+            raise ValueError(f"Unknown door type: {door}")
+        return self.aisle_occ[entry_row] < self.airplane.aisle_capacity_per_row
 
     def can_move_into(self, r_next: int) -> bool:
         return self.aisle_occ[r_next] < self.airplane.aisle_capacity_per_row
@@ -155,23 +162,43 @@ class BoardingModel:
         while order_index != self._next_to_enter:
             yield self.env.timeout(self.tick)
 
+        R = self.airplane.rows
+        if p.door == "front":
+            pos = 1
+            step = +1
+        elif p.door == "back":
+            pos = R
+            step = -1
+        else:
+            raise ValueError(f"Unknown door type: {p.door}")
+
         # Then wait until there is space at entry (row 1)
-        while not self.can_enter():
+        while not self.can_enter(p.door):
             yield self.env.timeout(self.tick)
 
         enter_t = self.env.now
-        self.aisle_occ[1] += 1
-        self._next_to_enter += 1  # allow next person to start attempting entry
 
-        # Walk forward row by row (no overtakes)
-        pos = 1
-        while pos < p.row:
-            while not self.can_move_into(pos + 1):
+        self.aisle_occ[pos] += 1
+        self._next_to_enter += 1 # allow next person to start attempting entry
+
+        # Walk forward row by row
+        while pos != p.row:
+            nxt = pos + step
+
+            # Check if within bounds
+            if not (1 <= nxt <= R):
+                raise RuntimeError(f"P{p.pid} tried to move out of aisle bounds: pos={pos}, nxt={nxt}, row={p.row}, door={p.door}")
+
+            while not self.can_move_into(nxt):
                 yield self.env.timeout(self.tick)
+
             yield self.env.timeout(self.times.walk_time_per_row)
+
+            # Move into next aisle segment
             self.aisle_occ[pos] -= 1
-            pos += 1
-            self.aisle_occ[pos] += 1
+            pos = nxt
+            self.aisle_occ[nxt] += 1
+
 
         reach_row_t = self.env.now
         seat_start_t = self.env.now
@@ -182,11 +209,9 @@ class BoardingModel:
 
         seat_end_t = self.env.now
 
-        # Take seat and free aisle segment at that row
         self.seat_occ[(p.row, p.seat)] = 1
         self.aisle_occ[pos] -= 1
 
-        # Trace for face validation
         if order_index < self.trace_first_n:
             self.trace.append(PassengerTrace(
                 pid=p.pid, seat_row=p.row, seat_id=p.seat, blockers_taken=k, has_luggage=p.has_luggage,
@@ -199,7 +224,6 @@ class BoardingModel:
         if self._seated == len(self.manifest):
             self.finish_time = float(self.env.now)
 
-
 def simulate(
     manifest: List[Passenger],
     seed: int = 0,
@@ -210,6 +234,7 @@ def simulate(
     rng = random.Random(seed)
     env = simpy.Environment()
     model = BoardingModel(env, rng, airplane, times, manifest, trace_first_n=trace_first_n)
+
     for i, p in enumerate(manifest):
         env.process(model.passenger_process(i, p))
     env.run()

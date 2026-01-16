@@ -15,7 +15,7 @@ import random
 from itertools import product
 import tqdm
 
-from model import simulate, AirplaneConfig, TimeConfig, PassengerTrace
+from model import Passenger, simulate, AirplaneConfig, TimeConfig, PassengerTrace
 from policies import get_policy, PolicyName
 
 
@@ -42,6 +42,32 @@ def write_csv(
         w.writerows(rows)
 
 
+def assign_doors_split(
+    manifest: List[Passenger],
+    rows: int, 
+    split_row: int | None = None
+) -> List[Passenger]:
+    """
+    Assign boarding door based on split row:
+    - rows <= split_row: front
+    - rows > split_row: back
+    """
+    if split_row is None:
+        split_row = rows // 2
+
+    out: List[Passenger] = []
+    for p in manifest:
+        door = "front" if p.row <= split_row else "back"
+        out.append(Passenger(
+            pid=p.pid,
+            row=p.row,
+            seat=p.seat,
+            has_luggage=p.has_luggage,
+            door=door,
+        ))
+    return out
+
+
 def run_replications(
     policy: PolicyName,
     airplane: AirplaneConfig,
@@ -52,6 +78,8 @@ def run_replications(
     # policy kwargs:
     policy_kwargs: Optional[Dict[str, Any]] = None,
     trace_first_n: int = 0,
+    single_entry: bool = True,
+    split_row: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Build a manifest from the policy
@@ -71,12 +99,15 @@ def run_replications(
             seat_ids=airplane.seat_ids,
             **policy_kwargs,
         )
+        if not single_entry:
+            manifest = assign_doors_split(manifest, rows=airplane.rows, split_row=split_row)
+        
         t, tr = simulate(
             manifest,
             seed=seed0 + r,
             airplane=airplane,
             times=times,
-            trace_first_n=trace_first_n,
+            trace_first_n=trace_first_n
         )
         finish_times.append(t)
         if r == 0:
@@ -99,7 +130,7 @@ def run_replications(
     }
 
 
-def task2_face_validation(out_dir: str = "results") -> Dict[str, Any]:
+def task2_face_validation(out_dir: str = "results", single_entry: bool = True) -> Dict[str, Any]:
     airplane = AirplaneConfig(rows=30)
     base = TimeConfig(
         walk_time_per_row=1.5,
@@ -150,6 +181,8 @@ def task2_face_validation(out_dir: str = "results") -> Dict[str, Any]:
             seed0=1000,
             p_luggage=cfg["p_luggage"],
             trace_first_n=5,
+            single_entry=single_entry,
+            split_row=airplane.rows // 2,
         )
         rows.append(
             {
@@ -163,11 +196,13 @@ def task2_face_validation(out_dir: str = "results") -> Dict[str, Any]:
                 "base_seat_time": cfg["times"].base_seat_time,
                 "interference_penalty": cfg["times"].interference_penalty,
                 "luggage_add_time": cfg["times"].luggage_add_time,
+                "single_entry": single_entry
             }
         )
         for tr in res["sample_trace"]:
             tr2 = dict(tr)
             tr2["scenario"] = name
+            tr2["single_entry"] = single_entry
             traces.append(tr2)
 
     summary_csv = os.path.join(out_dir, "task2_face_validation_summary.csv")
@@ -177,7 +212,7 @@ def task2_face_validation(out_dir: str = "results") -> Dict[str, Any]:
     return {"summary_csv": summary_csv, "trace_csv": trace_csv}
 
 
-def task2_sweep_seat_times(out_dir: str = "results") -> Dict[str, Any]:
+def task2_sweep_seat_times(out_dir: str = "results", single_entry: bool = True) -> Dict[str, Any]:
     airplane = AirplaneConfig(rows=30)
     reps = 50
 
@@ -214,6 +249,8 @@ def task2_sweep_seat_times(out_dir: str = "results") -> Dict[str, Any]:
             reps=reps,
             seed0=2000,
             p_luggage=p_luggage,
+            single_entry=single_entry,
+            split_row=airplane.rows // 2,
         )
         rows.append(
             {
@@ -225,6 +262,7 @@ def task2_sweep_seat_times(out_dir: str = "results") -> Dict[str, Any]:
                 "mean_time_s": res["mean_time_s"],
                 "sd_s": res["sd_s"],
                 "ci95_halfwidth_s": res["ci95_halfwidth_s"],
+                "single_entry": single_entry
             }
         )
 
@@ -245,6 +283,8 @@ def test_seat_time_distributions(
     out_dir: str = "results",
     out_json: str = "seat_time_distributions.json",
     seat_time_dists: Optional[Sequence[str]] = None,
+    single_entry: bool = True,
+    split_row: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     For each seat_time_dist in seat_time_dists, run several replications and collect per-passenger seat times for all runs.
@@ -274,6 +314,14 @@ def test_seat_time_distributions(
                 p_luggage=p_luggage,
                 seat_ids=airplane.seat_ids,
             )
+
+            if not single_entry:
+                manifest = assign_doors_split(
+                    manifest,
+                    rows=airplane.rows,
+                    split_row=split_row,
+                )
+
             # trace_first_n = all passengers
             _, trace = simulate(
                 manifest,
@@ -297,7 +345,9 @@ def test_seat_time_distributions(
 
 
 def task3_many_boarding_strategies(
-    out_dir: str = os.path.join("results", "json"),
+    out_dir: str = os.path.join("results", "json"), 
+    single_entry: bool = True, 
+    split_row=AirplaneConfig().rows // 2
 ) -> Dict[str, Any]:
     strategies = ["random", "back_to_front", "wilma", "steffen_boarding"]
     seat_time_distributions = ["lognormal", "triangular", "exponential"]
@@ -310,5 +360,7 @@ def task3_many_boarding_strategies(
             seat_time_dists=[seat_time_dist],
             out_dir=out_dir,
             out_json=f"{strategy}_{seat_time_dist}.json",
+            single_entry=single_entry,
+            split_row=split_row,
         )
     return {"n_tests": len(param_grid), "out_dir": out_dir}
