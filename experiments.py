@@ -280,7 +280,7 @@ def test_seat_time_distributions(
                 seed=seed,
                 airplane=airplane,
                 times=times,
-                trace_first_n=airplane.rows * len(airplane.seat_ids[0]),
+                trace_first_n=np.inf,
             )
             for passenger in trace:
                 entry = asdict(passenger)
