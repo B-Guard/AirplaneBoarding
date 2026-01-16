@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from typing import List, Dict, Any, Optional, Sequence, Tuple
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import numpy as np
 import os
 import csv
 import json
@@ -40,6 +42,56 @@ def write_csv(
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         w.writerows(rows)
+
+
+def single_run(
+    args, reps: int, policy_kwargs: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    (
+        base_seat,
+        interference,
+        luggage_add,
+        p_luggage,
+        strategy,
+        seat_time_distribution,
+    ) = args
+    airplane = AirplaneConfig(rows=30)
+    times = TimeConfig(
+        walk_time_per_row=1.5,
+        base_seat_time=base_seat,
+        interference_penalty=interference,
+        luggage_add_time=luggage_add,
+        seat_time_dist=seat_time_distribution,
+    )
+
+    policy_fn = get_policy(strategy)
+    policy_kwargs = policy_kwargs or {}
+    results = []
+    seed0=42
+    for r in range(reps):
+        rng = random.Random(seed0 + r)
+        manifest = policy_fn(
+            airplane.rows,
+            rng=rng,
+            p_luggage=p_luggage,
+            seat_ids=airplane.seat_ids,
+            **policy_kwargs,
+        )
+        t, tr = simulate(
+            manifest,
+            seed=seed0 + r,
+            airplane=airplane,
+            times=times,
+            trace_first_n=0,
+        )
+        result = {
+            "finish_time_s": t,
+            "policy": strategy,
+            "p_luggage": p_luggage,
+        }
+        result.update(asdict(times))
+        results.append(result)
+    return results
 
 
 def run_replications(
@@ -178,7 +230,6 @@ def task2_face_validation(out_dir: str = "results") -> Dict[str, Any]:
 
 
 def task2_sweep_seat_times(out_dir: str = "results") -> Dict[str, Any]:
-    airplane = AirplaneConfig(rows=30)
     reps = 50
 
     base_seat_values = [4, 6, 8, 10, 12]
@@ -186,6 +237,7 @@ def task2_sweep_seat_times(out_dir: str = "results") -> Dict[str, Any]:
     luggage_add_values = [1, 8, 16]
     p_luggage_values = [0, 0.5, 0.7, 1]
     strategy_values = ["random", "back_to_front", "wilma"]
+    seating_time_distributions = ["deterministic"]
 
     param_grid = list(
         product(
@@ -194,39 +246,29 @@ def task2_sweep_seat_times(out_dir: str = "results") -> Dict[str, Any]:
             luggage_add_values,
             p_luggage_values,
             strategy_values,
+            seating_time_distributions,
         )
     )
+
     rows = []
-    for base_seat, interference, luggage_add, p_luggage, strategy in tqdm.tqdm(
-        param_grid
-    ):
-        times = TimeConfig(
-            walk_time_per_row=1.5,
-            base_seat_time=base_seat,
-            interference_penalty=interference,
-            luggage_add_time=luggage_add,
-            seat_time_dist="deterministic",
-        )
-        res = run_replications(
-            policy=strategy,
-            airplane=airplane,
-            times=times,
-            reps=reps,
-            seed0=2000,
-            p_luggage=p_luggage,
-        )
-        rows.append(
-            {
-                "base_seat_time": base_seat,
-                "interference_penalty": interference,
-                "luggage_add_time": luggage_add,
-                "p_luggage": p_luggage,
-                "reps": reps,
-                "mean_time_s": res["mean_time_s"],
-                "sd_s": res["sd_s"],
-                "ci95_halfwidth_s": res["ci95_halfwidth_s"],
-            }
-        )
+    try:
+        with ProcessPoolExecutor(4) as executor:
+            futures = [executor.submit(single_run, args, reps) for args in param_grid]
+            for f in tqdm.tqdm(
+                as_completed(futures), total=len(futures), desc="Grid search"
+            ):
+                try:
+                    rows.extend(f.result())
+                except Exception as e:
+                    print(f"Error in task: {e}")
+    except KeyboardInterrupt:
+        print("\nKeyboardInterrupt detected! Shutting down workers...")
+        executor.shutdown(wait=False, cancel_futures=True)
+        # Optionally, save partial results here
+        partial_path = os.path.join(out_dir, "task2_sweep_seat_times_partial.csv")
+        write_csv(partial_path, rows)
+        print(f"Partial results saved to {partial_path}")
+        raise
 
     path = os.path.join(out_dir, "task2_sweep_seat_times.csv")
     write_csv(path, rows)
