@@ -34,3 +34,10 @@ Results are written into `./results/` by default, and the script prints the outp
 pip install simpy
 python run.py task2_face_validation
 python run.py task2_sweep
+python run.py task3_many_boarding_strategies
+
+## To run with 2 entry doors
+python run.py task2_face_validation --two_entries
+python run.py task2_sweep --two_entries
+python run.py task3_many_boarding_strategies --two_entries
+```
