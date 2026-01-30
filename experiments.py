@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from typing import List, Dict, Any, Optional, Sequence, Tuple
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import numpy as np
 import os
 import csv
 import json
@@ -221,6 +223,7 @@ def task2_sweep_seat_times(out_dir: str = "results", single_entry: bool = True) 
     luggage_add_values = [1, 8, 16]
     p_luggage_values = [0, 0.5, 0.7, 1]
     strategy_values = ["random", "back_to_front", "wilma"]
+    seating_time_distributions = ["deterministic"]
 
     param_grid = list(
         product(
@@ -229,8 +232,10 @@ def task2_sweep_seat_times(out_dir: str = "results", single_entry: bool = True) 
             luggage_add_values,
             p_luggage_values,
             strategy_values,
+            seating_time_distributions,
         )
     )
+
     rows = []
     for base_seat, interference, luggage_add, p_luggage, strategy in tqdm.tqdm(
         param_grid
@@ -328,7 +333,7 @@ def test_seat_time_distributions(
                 seed=seed,
                 airplane=airplane,
                 times=times,
-                trace_first_n=airplane.rows * len(airplane.seat_ids[0]),
+                trace_first_n=np.inf,
             )
             for passenger in trace:
                 entry = asdict(passenger)

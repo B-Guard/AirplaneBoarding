@@ -9,7 +9,7 @@ import random
 
 from model import Passenger, SeatId, SEATS_3X3, seat_group
 
-PolicyName = Literal["random", "back_to_front", "wilma", "steffen_boarding"]
+PolicyName = Literal["random", "back_to_front", "wilma", "steffen_boarding", "front_to_back"]
 
 
 def all_seats(rows: int, seat_ids: Tuple[SeatId, ...] = tuple(SEATS_3X3)) -> List[Tuple[int, SeatId]]:
@@ -35,9 +35,19 @@ def back_to_front(rows: int, rng: random.Random, p_luggage: float = 0.5,
     seats.sort(key=lambda x: x[0], reverse=True)
     return make_manifest_from_ordered_seats(seats, rng, p_luggage)
 
+def front_to_back(rows: int, rng: random.Random, p_luggage: float = 0.5,
+                  seat_ids: Tuple[SeatId, ...] = tuple(SEATS_3X3)) -> List[Passenger]:
+    seats = all_seats(rows, seat_ids)
+    # Sort by seat group (window, middle, aisle), then by row ascending
+    seats.sort(key=lambda x: seat_group(x[1]), reverse=True)
+    seats.sort(key=lambda x: x[0])
+    return make_manifest_from_ordered_seats(seats, rng, p_luggage)
+
 def wilma(rows: int, rng: random.Random, p_luggage: float = 0.5,
           seat_ids: Tuple[SeatId, ...] = tuple(SEATS_3X3)) -> List[Passenger]:
     seats = all_seats(rows, seat_ids)
+    # Just shuffle once to make the order within groups random
+    rng.shuffle(seats)
     # Sort by seat group (window, middle, aisle)
     seats.sort(key=lambda x: seat_group(x[1]))
     return make_manifest_from_ordered_seats(seats, rng, p_luggage)
@@ -45,6 +55,9 @@ def wilma(rows: int, rng: random.Random, p_luggage: float = 0.5,
 def policy_random(rows: int, rng: random.Random, p_luggage: float = 0.5,
                   seat_ids: Tuple[SeatId, ...] = tuple(SEATS_3X3)) -> List[Passenger]:
     seats = all_seats(rows, seat_ids)
+    rng.shuffle(seats)
+    # I have the sensation that one shuffle is not enough...
+    rng.shuffle(seats)
     rng.shuffle(seats)
     return make_manifest_from_ordered_seats(seats, rng, p_luggage)
 
@@ -81,4 +94,6 @@ def get_policy(name: PolicyName) -> Callable[..., List[Passenger]]:
         return wilma
     elif name == "steffen_boarding":
         return steffen_boarding
+    elif name == "front_to_back":
+        return front_to_back
     raise ValueError(f"Unknown policy: {name}")
