@@ -222,42 +222,67 @@ def plot_boarding_time_by_strategy(
     plt.close()
 
 
+def plot_total_boarding_time_barchart(
+    strategies,
+    seat_time_dists,
+    results_dir=os.path.join("results", "json"),
+    out_path=os.path.join("plots", "total_boarding_time_barchart.png"),
+):
+    # Load all data into a single DataFrame
+    records = []
+    for strategy in strategies:
+        for seat_time_dist in seat_time_dists:
+            df = load_experiment_json(strategy, seat_time_dist, results_dir=results_dir)
+            rep_group = df.groupby("replication")
+            for rep, group in rep_group:
+                total_boarding_time = group["seat_end_t"].max() - group["enter_t"].min()
+                records.append(
+                    {
+                        "policy": strategy,
+                        "seat_time_dist": seat_time_dist,
+                        "replication": rep,
+                        "finish_time_s": total_boarding_time,
+                    }
+                )
+
+    df = pd.DataFrame.from_records(records)
+
+    # Group by strategy and seat_time_dist, compute mean total boarding time
+    grouped = (
+        df.groupby(["policy", "seat_time_dist"])["finish_time_s"].mean().reset_index()
+    )
+    plt.figure(figsize=(10, 6))
+    sns.barplot(
+        data=grouped,
+        x="policy",
+        y="finish_time_s",
+        hue="seat_time_dist",
+        # palette="Set2",
+    )
+    # plt.title("Average Total Boarding Time by Strategy and Seat Time Distribution")
+    plt.xlabel("Boarding Strategy")
+    plt.ylabel("Average Total Boarding Time (s)")
+    plt.legend(title="Seat Time Distribution")
+    plt.tight_layout()
+    plt.grid(axis="y")
+    plt.savefig(out_path)
+    plt.close()
+
+
 if __name__ == "__main__":
-    # data_file = os.path.join("results", "task2_sweep_seat_times.csv")
-    # df = pd.read_csv(data_file)
-
-    # plot_heatmap(
-    #     df,
-    #     x_col="base_seat_time",
-    #     y_col="interference_penalty",
-    #     value_col="mean_time_s",
-    #     title="Mean Boarding Time vs Seat Time Parameters",
-    #     xlabel="Base Seat Time",
-    #     ylabel="Interference Penalty",
-    #     output_file="mean_boarding_time_heatmap.png",
-    # )
-
-    # plot_heatmap(
-    #     df,
-    #     x_col="base_seat_time",
-    #     y_col="interference_penalty",
-    #     value_col="ci95_halfwidth_s",
-    #     title="95% CI Half-Width vs Seat Time Parameters",
-    #     xlabel="Base Seat Time",
-    #     ylabel="Interference Penalty",
-    #     output_file="ci95_halfwidth_heatmap.png",
-    # )
+    data_file = os.path.join("results", "task2_sweep_seat_times.csv")
+    df = pd.read_csv(data_file)
 
     strategies = ["back_to_front", "random", "wilma", "steffen_boarding"]
-    # strategies = ["front_to_back", "steffen_boarding"]
+    # # strategies = ["front_to_back", "steffen_boarding"]
     seat_time_dists = ["exponential", "lognormal", "triangular"]
-    # plot_avg_seat_time_grid(strategies, seat_time_dists)
+    plot_total_boarding_time_barchart(strategies, seat_time_dists)
 
-    for seat_time_dist in seat_time_dists:
-        plot_boarding_time_by_strategy(
-            strategies=strategies,
-            seat_time_dist=seat_time_dist,
-            out_path=os.path.join(
-                "plots", f"avg_boarding_time_by_strategy_{seat_time_dist}.png"
-            ),
-        )
+    # for seat_time_dist in seat_time_dists:
+    #     plot_boarding_time_by_strategy(
+    #         strategies=strategies,
+    #         seat_time_dist=seat_time_dist,
+    #         out_path=os.path.join(
+    #             "plots", f"avg_boarding_time_by_strategy_{seat_time_dist}.png"
+    #         ),
+    #     )
